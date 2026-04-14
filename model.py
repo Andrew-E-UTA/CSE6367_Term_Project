@@ -11,23 +11,78 @@
 #
 #       image -> pre-process -> segment -> mask -> classify -> Damage Metric
 # '''
+#Basic imports
+import numpy
+import kagglehub
+import matplotlib.pyplot as plt
+
+
+#CV imports
+from PIL import Image
+
+#system imports
+import os
+from pathlib import Path
+
+#pytorch imports
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 
 #==============================================================================
 #   Read Images
 #==============================================================================
-import numpy
-import cv2
-import kagglehub
-from pathlib import Path
 
-data_path = Path("path/to/folder")
+data_path_1 = Path("../data/cse6367_cardboardbox_damage_1")
+data_path_2 = Path("../data/cse6367_cardboardbox_damage_2")
 
-if not data_path.is_dir():
-    dataset1 = kagglehub.dataset_download("saniakaushikeehiman/damage-package", "data/dataset1")
-    dataset2 = kagglehub.dataset_download("madhusastra/cardboard-defect", "data/dataset2")
+if not data_path_1.is_dir():
+    kagglehub.dataset_download("saniakaushikeehiman/damage-package", output_dir= str(data_path_1))
+    
+if not data_path_2.is_dir():
+    kagglehub.dataset_download("madhusastra/cardboard-defect", output_dir=str(data_path_2))
 
-print(dataset1)
-print(dataset2)
+#dataset must implement __init__, __len__, __getitem__
+class CSE6367_Cardboardbox_dataset(Dataset):
+    def __init__(self, dir, transform):
+        self.img_dir = Path(dir)
+        self.transform  = transform
+        
+        self.image_paths = sorted([
+            p for p in self.img_dir.iterdir()
+            if p.suffix.lower() in ('.jpg', '.jpeg', '.png')
+        ])
+
+        if len(self.image_paths) == 0:
+            raise FileNotFoundError(f'Could not find any images in {self.img_dir}')
+    
+    def __len__(self):
+        return len(self.image_paths)
+    
+    def __getitem__(self, idx):
+        image_path = self.image_paths[idx]
+        image  = Image.open(image_path).convert("RGB")
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image    #TODO: no labels yet
+
+transform = transforms.Compose([
+    transforms.Resize((640, 640)), #the files are already in this size
+    transforms.ToTensor(),
+])
+
+ds1_test = CSE6367_Cardboardbox_dataset(
+    dir=data_path_1 / "cse6367_cardboardbox_damage_1" / "pakka_wala-final-dataset" / " images" / "test",
+    transform=transform,
+)
+
+ds2_test = CSE6367_Cardboardbox_dataset(
+    dir=data_path_2 / "Cardboard Box Defect.v8i.yolov8" / "test" / "images",
+    transform=transform,
+)
+
+
 #==============================================================================
 #   Pre-Processing
 #==============================================================================
