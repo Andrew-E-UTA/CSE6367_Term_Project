@@ -115,26 +115,22 @@ def img_show(dataset):
 #==============================================================================
 #   Pre-Processing
 #==============================================================================
-# rgb2Gray
-#   - color uneeded
-# Otsu threshold
-#   - Seperate box from backgroud
 
+# Parameters chosen after trail-error approach
 def preprocess(image: np.ndarray):
     # grayscale
-    image = np.moveaxis(image, 0, -1) * 255
-    image = image.astype(np.uint8)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     #cleanup image (blur, equalize)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))               
     equalized = clahe.apply(blurred)    
+    edges = cv2.Canny(equalized, 71, 116)  
 
     #Morphological ops 
-    mask = cv2.adaptiveThreshold(equalized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9,9))  
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2) 
+    mask = cv2.adaptiveThreshold(edges, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=6) 
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
     
     #find contour and fill
@@ -146,35 +142,65 @@ def preprocess(image: np.ndarray):
         mask = solid_mask
     
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)  
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     
     masked = cv2.bitwise_and(equalized, equalized, mask=mask)
 
-    return gray, mask, masked
-
-for i in range(len(ds2_test)):
-    img = ds2_test[i]
-    e, o, m = preprocess(img)
-
-    _, sub_plot = plt.subplots(1, 3)
-    sub_plot[0].imshow(e, cmap='gray')
-    sub_plot[0].set_title('gray_equalized')
-    sub_plot[0].axis('off')
-
-    sub_plot[1].imshow(o, cmap='gray')
-    sub_plot[1].set_title('mask')
-    sub_plot[1].axis('off')
-
-    sub_plot[2].imshow(m, cmap='gray')
-    sub_plot[2].set_title('masked')
-    sub_plot[2].axis('off')
-
-    plt.show()
+    return masked
 
 #==============================================================================
 #   Segmentation
 #==============================================================================
 
+def segment_holes(masked_image: np.ndarray):
+    thresh_mask = cv2.adaptiveThreshold(masked_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+
+    kernel = np.ones((3, 3), np.uint8)
+    thresh_mask = cv2.morphologyEx(thresh_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    min_area = 30
+    max_area = 500
+    # 3. Contour analysis
+    contours, _ = cv2.findContours(thresh_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    hole_mask = np.zeros_like(masked_image)
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < min_area or area > max_area:
+            continue
+        perimeter = cv2.arcLength(cnt, True)
+        if perimeter == 0: continue
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+        if circularity < 0.4:  
+            continue
+        
+        cv2.drawContours(hole_mask, [cnt], -1, 255, cv2.FILLED)
+    
+    hole_image = cv2.bitwise_and(masked_image, masked_image, mask=hole_mask)
+    return hole_image
+
+for i in range(len(ds2_test)):
+    image = ds2_test[i]
+    image = np.moveaxis(image, 0, -1) * 255
+    image = image.astype(np.uint8)
+
+    processed = preprocess(image)
+    hole_masked_image = segment_holes(processed)
+    
+    _, sub_plot = plt.subplots(1, 3)
+
+    sub_plot[0].imshow(image)
+    sub_plot[0].set_title('Input')
+    sub_plot[0].axis('off')
+
+    sub_plot[1].imshow(processed, cmap='gray')
+    sub_plot[1].set_title('Processed')
+    sub_plot[1].axis('off')
+
+    # sub_plot[2].imshow(hole_masked_image, cmap='gray')
+    # sub_plot[2].set_title('Hole Segments')
+    # sub_plot[2].axis('off')
+
+    plt.show()
 
 #==============================================================================
 #   Masking
