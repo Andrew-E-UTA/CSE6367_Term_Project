@@ -133,8 +133,8 @@ def preprocess(image: np.ndarray):
 
     #Morphological ops 
     mask = cv2.adaptiveThreshold(equalized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9,9)) 
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)  
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9,9))  
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2) 
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
     
     #find contour and fill
@@ -152,23 +152,24 @@ def preprocess(image: np.ndarray):
 
     return gray, mask, masked
 
-i = ds2_test[0]#[random.randint(0,len(ds2_test))]
-e, o, m = preprocess(i)
+for i in range(len(ds2_test)):
+    img = ds2_test[i]
+    e, o, m = preprocess(img)
 
-_, sub_plot = plt.subplots(1, 3)
-sub_plot[0].imshow(e, cmap='gray')
-sub_plot[0].set_title('gray_equalized')
-sub_plot[0].axis('off')
+    _, sub_plot = plt.subplots(1, 3)
+    sub_plot[0].imshow(e, cmap='gray')
+    sub_plot[0].set_title('gray_equalized')
+    sub_plot[0].axis('off')
 
-sub_plot[1].imshow(o, cmap='gray')
-sub_plot[1].set_title('mask')
-sub_plot[1].axis('off')
+    sub_plot[1].imshow(o, cmap='gray')
+    sub_plot[1].set_title('mask')
+    sub_plot[1].axis('off')
 
-sub_plot[2].imshow(m, cmap='gray')
-sub_plot[2].set_title('masked')
-sub_plot[2].axis('off')
+    sub_plot[2].imshow(m, cmap='gray')
+    sub_plot[2].set_title('masked')
+    sub_plot[2].axis('off')
 
-plt.show()
+    plt.show()
 
 #==============================================================================
 #   Segmentation
