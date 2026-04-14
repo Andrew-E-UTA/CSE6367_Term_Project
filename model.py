@@ -135,7 +135,7 @@ def preprocess(image: np.ndarray):
     mask = cv2.adaptiveThreshold(equalized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9,9)) 
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)  
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
     
     #find contour and fill
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -144,8 +144,10 @@ def preprocess(image: np.ndarray):
         solid_mask = np.zeros_like(mask)
         cv2.drawContours(solid_mask, [largest], -1, 255, cv2.FILLED)
         mask = solid_mask
-
-    #apply
+    
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)  
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    
     masked = cv2.bitwise_and(equalized, equalized, mask=mask)
 
     return gray, mask, masked
