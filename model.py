@@ -92,115 +92,137 @@ ds2_train = CSE6367_Cardboardbox_dataset(
     transform=transform,
 )
 
-def img_show(dataset):
-    n = 3
-    fig, axes = plt.subplots(1, n, figsize=(6 * n, 6))
-
-    indexes = [random.randint(0, len(dataset)) for _ in range(n)]
-
-    for ax, idx in zip(axes, indexes):
-        tensor = dataset[idx]
-        img_np = tensor.permute(1, 2, 0).numpy()
-
-        ax.imshow(img_np)
-        ax.axis("off")
-
-    plt.tight_layout()
-    plt.show()
-
-
-#show dataset is working
-# img_show(ds2_test)
-
 #==============================================================================
 #   Pre-Processing
 #==============================================================================
 
-# Parameters chosen after trail-error approach
-def preprocess(image: np.ndarray):
-    # grayscale
+def trim_contours(contours, min_length):
+    return [cnt for cnt in contours if cv2.arcLength(cnt, closed=False) >= min_length]
+
+def contour_to_mask(contours, shape, fill=True, thickness=2):
+    contours = [contours] if isinstance(contours, np.ndarray) else contours
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.drawContours(mask, contours, -1, 255, thickness=cv2.FILLED if fill else thickness)
+    return mask
+
+def isolate_thick_lines(contour_mask, min_area=500, min_aspect_ratio=3):
+    num_labels, labels = cv2.connectedComponents(contour_mask)
+    filtered = np.zeros_like(contour_mask)
+    
+    for i in range(1, num_labels):
+        comp = (labels == i).astype(np.uint8) * 255
+        x, y, w, h = cv2.boundingRect(comp)
+        aspect = max(w, h) / (min(w, h) + 1e-5)
+        area = np.sum(comp > 0)
+        
+        if area > min_area or (area > min_area//2 and aspect > min_aspect_ratio):
+            filtered = cv2.bitwise_or(filtered, comp)
+    
+    return filtered
+
+def mask_out_box(image: np.ndarray, pre_trim_min_length=30, dilate_kernel_size=3, dilate_iterations=2):
+    # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    #cleanup image (blur, equalize)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))               
-    equalized = clahe.apply(blurred)    
-    edges = cv2.Canny(equalized, 71, 116)  
+    #Edge detection
+    edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+    
+    #Find contours & pre-trim noise
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    all_contours_mask = contour_to_mask(contours, gray.shape)
+    
+    #Simplify contours
+    simplified_contours = [
+        cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
+        for cnt in contours
+    ]
+    simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
 
-    #Morphological ops 
-    mask = cv2.adaptiveThreshold(edges, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=6) 
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
-    
-    #find contour and fill
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if contours:
-        largest = max(contours, key=cv2.contourArea)
-        solid_mask = np.zeros_like(mask)
-        cv2.drawContours(solid_mask, [largest], -1, 255, cv2.FILLED)
-        mask = solid_mask
-    
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)  
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    
-    masked = cv2.bitwise_and(equalized, equalized, mask=mask)
+    # Filter out short contours
+    trimmed_contours = trim_contours(simplified_contours, min_length=pre_trim_min_length)  
+    trimmed_contours_mask = contour_to_mask(trimmed_contours, gray.shape)
 
-    return masked
+    #dilate contours to close gaps before isolating lines
+    dilated_mask = cv2.dilate(trimmed_contours_mask, 
+        np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8), 
+        iterations=dilate_iterations)
+
+    thick_lines_mask = isolate_thick_lines(dilated_mask, min_area=500, min_aspect_ratio=3)
+    
+    return all_contours_mask, simplified_contours_mask, trimmed_contours_mask, dilated_mask, thick_lines_mask
+
+#process images
+sample_images = []
+outs = []
+for i in range(len(ds2_test)):
+    img = ds2_test[i]
+    img = np.moveaxis(img, 0, -1) * 255
+    img = img.astype(np.uint8)
+    sample_images.append(img)
+    outs.append(mask_out_box(img))
+
+#setup plot
+plot_size = 4
+rows, cols = len(sample_images), len(outs[0]) if isinstance(outs[0], tuple) else 1
+fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
+axes = axes.reshape(1, -1) if rows == 1 else axes
+
+#plot
+for outp, img, ax_row in zip(outs, sample_images, axes):
+    for out, ax in zip(outp, ax_row):
+        ax.imshow(out, cmap='gray')
+        ax.axis('off')
+
+manager = plt.get_current_fig_manager()
+manager.full_screen_toggle()
+plt.tight_layout()
+plt.show()
 
 #==============================================================================
 #   Segmentation
 #==============================================================================
 
-def segment_holes(masked_image: np.ndarray):
-    thresh_mask = cv2.adaptiveThreshold(masked_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
-
-    kernel = np.ones((3, 3), np.uint8)
-    thresh_mask = cv2.morphologyEx(thresh_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-
-    min_area = 30
-    max_area = 500
-    # 3. Contour analysis
-    contours, _ = cv2.findContours(thresh_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    hole_mask = np.zeros_like(masked_image)
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < min_area or area > max_area:
-            continue
-        perimeter = cv2.arcLength(cnt, True)
-        if perimeter == 0: continue
-        circularity = 4 * np.pi * area / (perimeter * perimeter)
-        if circularity < 0.4:  
-            continue
-        
-        cv2.drawContours(hole_mask, [cnt], -1, 255, cv2.FILLED)
+def segment_dark_holes(masked_image, box_mask, method='otsu', block_size=15, C=5, min_area=50):
+    # Ensure we only work inside the box
+    masked_image = cv2.bitwise_and(masked_image, masked_image, mask=box_mask)
     
-    hole_image = cv2.bitwise_and(masked_image, masked_image, mask=hole_mask)
-    return hole_image
-
-for i in range(len(ds2_test)):
-    image = ds2_test[i]
-    image = np.moveaxis(image, 0, -1) * 255
-    image = image.astype(np.uint8)
-
-    processed = preprocess(image)
-    hole_masked_image = segment_holes(processed)
+    _, dark_mask = cv2.threshold(masked_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    _, sub_plot = plt.subplots(1, 3)
-
-    sub_plot[0].imshow(image)
-    sub_plot[0].set_title('Input')
-    sub_plot[0].axis('off')
-
-    sub_plot[1].imshow(processed, cmap='gray')
-    sub_plot[1].set_title('Processed')
-    sub_plot[1].axis('off')
-
-    # sub_plot[2].imshow(hole_masked_image, cmap='gray')
-    # sub_plot[2].set_title('Hole Segments')
-    # sub_plot[2].axis('off')
-
-    plt.show()
+    # Clean noise: remove small specks (morphological opening)
+    kernel = np.ones((3,3), np.uint8)
+    dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    
+    # Fill small holes inside dark regions (closing)
+    dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    
+    # Remove regions smaller than min_area
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(dark_mask, connectivity=8)
+    hole_mask = np.zeros_like(dark_mask)
+    hole_areas = []
+    area = 0
+    for i in range(1, num_labels):  # skip background
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= min_area:
+            hole_mask[labels == i] = 255
+            hole_areas.append(area)
+    
+    # Optional: further filter by intensity (holes should be significantly darker)
+    # Compute mean intensity of each connected component
+    mean_intensities = []
+    for i in range(1, num_labels):
+        if area >= min_area:
+            component_pixels = masked_image[labels == i]
+            mean_intensity = np.mean(component_pixels)
+            mean_intensities.append(mean_intensity)
+    
+    stats_dict = {
+        'num_holes': len(hole_areas),
+        'areas': hole_areas,
+        'mean_intensities': mean_intensities,
+        'total_hole_area': sum(hole_areas)
+    }
+    
+    return hole_mask, stats_dict
 
 #==============================================================================
 #   Masking
