@@ -120,14 +120,14 @@ def isolate_thick_lines(contour_mask, min_area=500, min_aspect_ratio=3):
     
     return filtered
 
-def mask_out_box(image: np.ndarray, pre_trim_min_length=30, dilate_kernel_size=3, dilate_iterations=2):
+def mask_out_box_2(image: np.ndarray, pre_trim_min_length=50, dilate_kernel_size=3, dilate_iterations=2):
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     #Edge detection
     edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
     
-    #Find contours & pre-trim noise
+    #Find contours
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     all_contours_mask = contour_to_mask(contours, gray.shape)
     
@@ -142,14 +142,70 @@ def mask_out_box(image: np.ndarray, pre_trim_min_length=30, dilate_kernel_size=3
     trimmed_contours = trim_contours(simplified_contours, min_length=pre_trim_min_length)  
     trimmed_contours_mask = contour_to_mask(trimmed_contours, gray.shape)
 
-    #dilate contours to close gaps before isolating lines
-    dilated_mask = cv2.dilate(trimmed_contours_mask, 
+    thick_lines_mask = isolate_thick_lines(trimmed_contours_mask, min_area=500, min_aspect_ratio=3)
+
+    dilated_mask = cv2.dilate(thick_lines_mask, 
         np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8), 
         iterations=dilate_iterations)
+        
+    return all_contours_mask, simplified_contours_mask, trimmed_contours_mask, thick_lines_mask, dilated_mask
+
+def mask_out_box_3(image: np.ndarray, pre_trim_min_length=50, dilate_kernel_size=3, dilate_iterations=2):
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    #Edge detection
+    edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+    
+    #Find contours & simplify for efficiency
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    simplified_contours = [
+        cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
+        for cnt in contours
+    ]
+    simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
+
+    # Filter out short contours
+    trimmed_contours = trim_contours(contours, min_length=pre_trim_min_length)  
+    trimmed_contours_mask = contour_to_mask(trimmed_contours, gray.shape)
+
+    dilated_mask = cv2.dilate(trimmed_contours_mask, 
+        np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8), 
+        iterations=dilate_iterations)        
 
     thick_lines_mask = isolate_thick_lines(dilated_mask, min_area=500, min_aspect_ratio=3)
+
+    return simplified_contours_mask, trimmed_contours_mask, dilated_mask, thick_lines_mask
+
+def mask_out_box(image: np.ndarray, trim_length=50, dilate_kernel_size=3, dilate_iterations=1):
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    #Edge detection
+    edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
     
-    return all_contours_mask, simplified_contours_mask, trimmed_contours_mask, dilated_mask, thick_lines_mask
+    #Find contours & simplify for efficiency
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    simplified_contours = [
+        cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
+        for cnt in contours
+    ]
+    simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
+
+    #Isolate thich lines
+    thick_lines_mask = isolate_thick_lines(simplified_contours_mask, min_area=500, min_aspect_ratio=3)
+
+    #Dilate contours
+    dilated_mask = cv2.dilate(thick_lines_mask, 
+        np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8), 
+        iterations=dilate_iterations)        
+    dilated_contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Filter out short contours
+    trimmed_contours = trim_contours(dilated_contours, min_length=trim_length)  
+    trimmed_contours_mask = contour_to_mask(trimmed_contours, gray.shape)
+
+    return simplified_contours_mask, thick_lines_mask, dilated_mask, trimmed_contours_mask
 
 #process images
 sample_images = []
@@ -162,7 +218,7 @@ for i in range(len(ds2_test)):
     outs.append(mask_out_box(img))
 
 #setup plot
-plot_size = 4
+plot_size = 2
 rows, cols = len(sample_images), len(outs[0]) if isinstance(outs[0], tuple) else 1
 fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
 axes = axes.reshape(1, -1) if rows == 1 else axes
@@ -173,8 +229,8 @@ for outp, img, ax_row in zip(outs, sample_images, axes):
         ax.imshow(out, cmap='gray')
         ax.axis('off')
 
-manager = plt.get_current_fig_manager()
-manager.full_screen_toggle()
+# manager = plt.get_current_fig_manager()
+# manager.full_screen_toggle()
 plt.tight_layout()
 plt.show()
 
