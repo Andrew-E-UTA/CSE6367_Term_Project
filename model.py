@@ -77,16 +77,15 @@ ds1_test = CSE6367_Cardboardbox_dataset(
     dir=data_path_1 / "pakka_wala-final-dataset/images/test",
     transform=transform,
 )
-
 ds2_test = CSE6367_Cardboardbox_dataset(
     dir=data_path_2 / "Cardboard Box Defect.v8i.yolov8/test/images",
     transform=transform,
 )
+
 ds1_train = CSE6367_Cardboardbox_dataset(
     dir=data_path_1 / "pakka_wala-final-dataset/images/train",
     transform=transform,
 )
-
 ds2_train = CSE6367_Cardboardbox_dataset(
     dir=data_path_2 / "Cardboard Box Defect.v8i.yolov8/train/images",
     transform=transform,
@@ -121,84 +120,7 @@ def contour_to_color_mask(contours, shape, fill=True, thickness=2, seed=42):
         cv2.drawContours(mask, [cnt], -1, color, thickness=draw_thickness)
     return mask
 
-def straight_subset(contour, angle_thresh=10, min_length_pixels=20):
-    points = contour[:, 0, :] if contour.ndim == 3 else contour.copy()
-    
-    if len(points) < 2:
-        return []
-    
-    segments = []
-    current_segment = [points[0]]    
-
-    #local func 
-    def check_and_add(segment):
-        if len(current_segment) >= 2:
-            seg_points = np.array(current_segment).reshape(-1, 1, 2)
-            seg_len = cv2.arcLength(seg_points, closed=False)
-            if seg_len >= min_length_pixels:
-                segments.append(seg_points)
-    
-    for i in range(1, len(points) - 1):
-        current_segment.append(points[i])
-        
-        prev_vec = points[i] - points[i-1]
-        next_vec = points[i+1] - points[i]
-        norm_prev = np.linalg.norm(prev_vec)
-        norm_next = np.linalg.norm(next_vec)
-        
-        angle = 0
-        if norm_prev > 0 and norm_next > 0:
-            cos_angle = np.dot(prev_vec, next_vec) / (norm_prev * norm_next)
-            cos_angle = np.clip(cos_angle, -1, 1)
-            angle = np.degrees(np.arccos(cos_angle))
-
-        # If not line anymore -> cut and add to list
-        if angle > angle_thresh:
-            check_and_add(current_segment)
-            current_segment = [points[i]]
-    
-    # Add the last segment
-    current_segment.append(points[-1])
-    check_and_add(current_segment)
-    
-    return segments
-
-def fit_largest_contours(contours, n, shape, fill=True, angle_thresh=None, min_len=20):
-    # Ensure list
-    if isinstance(contours, np.ndarray) and len(contours.shape) == 3:
-        contours = [contours]
-    elif not isinstance(contours, list):
-        contours = [contours]
-    if len(contours) == 0:
-        return np.zeros(shape, dtype=np.uint8)
-    
-    areas = [cv2.contourArea(cnt) for cnt in contours]
-    if n > len(contours):
-        n = len(contours)
-    indices = np.argsort(areas)[-n:][::-1]
-    largest = [contours[i] for i in indices]
-
-    if len(largest) == 0:
-        return np.zeros(shape, dtype=np.uint8)
-
-    all_points = []
-    for cnt in largest:
-        if angle_thresh is not None:
-            segments = straight_subset(cnt, angle_thresh=angle_thresh, min_length_pixels=min_len)
-            for seg in segments:
-                all_points.append(seg.reshape(-1, 2))
-        else:
-            all_points.append(cnt.reshape(-1, 2))
-    
-    if len(all_points) == 0:
-        return np.zeros(shape, dtype=np.uint8)
-
-    #create Hull
-    all_points = np.vstack(all_points)
-    hull = cv2.convexHull(all_points)   
-    return all_points, contour_to_mask(hull, shape, fill=fill)
-
-def mask_out_box(image: np.ndarray, trim_length=100, dilate_kernel_size=3, dilate_iterations=1):
+def mask_out_box(image: np.ndarray, trim_length=100, dilate_kernel_size=5, dilate_iterations=2):
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -211,6 +133,7 @@ def mask_out_box(image: np.ndarray, trim_length=100, dilate_kernel_size=3, dilat
         cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
         for cnt in contours
     ]
+    simplified_contours = trim_contours(simplified_contours, min_length=20)
     simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
 
     # #Dilate contours
@@ -219,16 +142,18 @@ def mask_out_box(image: np.ndarray, trim_length=100, dilate_kernel_size=3, dilat
     dilated_contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # Filter out short contours
-    pre_trim_len = 100
-    trimmed_contours = trim_contours(dilated_contours, min_length=pre_trim_len)  
-    trimmed_contours_mask = contour_to_color_mask(trimmed_contours, gray.shape, fill=False, thickness=2)
+    trimmed_contours = trim_contours(dilated_contours, min_length=200)  
+    trimmed_contours_mask = contour_to_color_mask(trimmed_contours, gray.shape, fill=True, thickness=3)
 
-    fit_contours, fit_mask = fit_largest_contours(trimmed_contours, n=1, shape=gray.shape, fill=True)
-    fit_mask = contour_to_color_mask(fit_contours, gray.shape, fill=False, thickness=2)
-    straight_contours, straight_fit_mask = fit_largest_contours(trimmed_contours, n=2, shape=gray.shape, fill=True, angle_thresh=15, min_len=20)
-    straight_mask = contour_to_color_mask(straight_contours, gray.shape, fill=False, thickness=2)
+    #Largest contour based on area
+    max_contour = max([(cv2.contourArea(contour),contour) for contour in trimmed_contours])[1]
+    largest_mask = contour_to_mask(max_contour, gray.shape, fill=True)
 
-    return simplified_contours_mask, (True, trimmed_contours_mask), fit_mask, straight_mask
+    # #see what the contours look like from that one mask
+    # new_contours, _ = cv2.findContours(largest_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # new_mask = contour_to_mask(new_contours, gray.shape, fill=False)
+
+    return gray, largest_mask
 
 #process images
 sample_images = []
