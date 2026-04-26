@@ -35,14 +35,14 @@ from torchvision import transforms
 #   Read Images
 #==============================================================================
 
-data_path_1 = Path("../data/cse6367_cardboardbox_damage_1")
-data_path_2 = Path("../data/cse6367_cardboardbox_damage_2")
-
-if not data_path_1.is_dir():
-    kagglehub.dataset_download("saniakaushikeehiman/damage-package", output_dir= str(data_path_1))
+# data_path_1 = Path("../data/cse6367_cardboardbox_damage_1")
+# data_path_2 = Path("../data/cse6367_cardboardbox_damage_2")
+# if not data_path_1.is_dir():
+#     kagglehub.dataset_download("saniakaushikeehiman/damage-package", output_dir= str(data_path_1))
     
-if not data_path_2.is_dir():
-    kagglehub.dataset_download("madhusastra/cardboard-defect", output_dir=str(data_path_2))
+# if not data_path_2.is_dir():
+#     kagglehub.dataset_download("madhusastra/cardboard-defect", output_dir=str(data_path_2))
+
 
 #dataset must implement __init__, __len__, __getitem__
 class CSE6367_Cardboardbox_dataset(Dataset):
@@ -73,21 +73,9 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-ds1_test = CSE6367_Cardboardbox_dataset(
-    dir=data_path_1 / "pakka_wala-final-dataset/images/test",
-    transform=transform,
-)
-ds2_test = CSE6367_Cardboardbox_dataset(
-    dir=data_path_2 / "Cardboard Box Defect.v8i.yolov8/test/images",
-    transform=transform,
-)
-
-ds1_train = CSE6367_Cardboardbox_dataset(
-    dir=data_path_1 / "pakka_wala-final-dataset/images/train",
-    transform=transform,
-)
-ds2_train = CSE6367_Cardboardbox_dataset(
-    dir=data_path_2 / "Cardboard Box Defect.v8i.yolov8/train/images",
+ideal_box_data_path = Path("../data/Ideal_Box_Data")
+ideal_dataset = CSE6367_Cardboardbox_dataset(
+    dir=ideal_box_data_path,
     transform=transform,
 )
 
@@ -96,8 +84,11 @@ ds2_train = CSE6367_Cardboardbox_dataset(
 #==============================================================================
 
 #remove noise (contours with small length)
-def trim_contours(contours, min_length):
+def trim_by_len(contours, min_length):
     return [cnt for cnt in contours if cv2.arcLength(cnt, closed=False) >= min_length]
+
+def trim_by_area(contours, min_area):
+    return [cnt for cnt in contours if cv2.contourArea(cnt) >= min_area]
 
 #visualize contours
 def contour_to_mask(contours, shape, fill=False, thickness=2, color=False, seed=42):
@@ -120,9 +111,17 @@ def apply_mask(image, mask):
 #single function to get the contours and a debug mask for visualization
 def get_contours_and_mask(single_ch_img, trim_len=10):
     contours, _ = cv2.findContours(single_ch_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = trim_contours(contours, trim_len)
+    contours = trim_by_len(contours, trim_len)
     mask = contour_to_mask(contours, single_ch_img.shape, fill=False, thickness=2)
     return contours, mask
+
+def approximate_contours(contours, alpha = .01):
+    contours = [contours] if not isinstance(contours, list) else contours
+    approx_contours = [
+        cv2.approxPolyDP(contour, alpha * cv2.arcLength(contour, closed=False), closed=False) 
+        for contour in contours
+    ]
+    return approx_contours
 
 #Full Pre-processing step of graying image and extracting it from the background
 def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_length= 20, trim_length=200, dilate_kernel_size=3, dilate_iterations=2):
@@ -140,7 +139,7 @@ def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_le
         cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
         for cnt in contours
     ]
-    simplified_contours = trim_contours(simplified_contours, min_length=pre_trim_length)
+    simplified_contours = trim_by_len(simplified_contours, min_length=pre_trim_length)
     simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
 
     # #Dilate contours
@@ -149,53 +148,85 @@ def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_le
     dilated_contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # Filter out short contours
-    trimmed_contours = trim_contours(dilated_contours, min_length=trim_length)  
+    trimmed_contours = trim_by_len(dilated_contours, min_length=trim_length)  
 
     #Largest contour based on area
     max_contour = max(trimmed_contours, key=cv2.contourArea)
-    largest_mask = contour_to_mask(max_contour, gray.shape, fill=True)
+    largest_mask = contour_to_mask(max_contour, gray.shape, fill=False)
 
     masked_image = apply_mask(gray, largest_mask)
 
     return (masked_image, largest_mask)
 
+def image_visual_stats(image):
+    image = cv2.GaussianBlur(image, (33,33), 0)   
+    img_r, img_g, img_b = img[:,:,0], img[:,:,1], img[:,:,2]
+    img_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    img_h, img_s, img_v = img_hsv[:,:,0], img_hsv[:,:,1], img_hsv[:,:,2]
+
+    img_parts = [img_r, img_g, img_b, img_h, img_s, img_v]
+    edge_masks = []
+    for img_part in img_parts:
+        edges = cv2.adaptiveThreshold(img_part, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+        # edges = cv2.Sobel(img_part, ddepth=cv2.CV_8U, dx=0, dy=1, ksize=5)
+        # _, edges = cv2.threshold(img_part, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # contours, _ = cv2.findContours(image=edges, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
+        # contours = trim_by_len(contours, 10)
+        # contour_mask = contour_to_mask(contours, image.shape, color=True)
+
+        # edges = cv2.adaptiveThreshold(contour_mask, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+        # edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5,5), np.uint8), iterations=1)
+
+        edge_masks.append(edges)
+
+    return (*edge_masks,)
+    # return (*img_parts,)
+
 #process images
 outs = []
-for i in range(len(ds2_test)):
+for i in range(len(ideal_dataset)):
     #prepare image
-    img = ds2_test[i]
+    img = ideal_dataset[i]
     img = np.moveaxis(img, 0, -1) * 255
     img = img.astype(np.uint8)
 
     #pass through pre-process
     img_and_mask = mask_out_box(img)
-    outs.append(img_and_mask)
+    outs.append((img, *img_and_mask))
 
-#setup plot
-# plot_size = 1
-# rows, cols = len(outs), len(outs[0]) if isinstance(outs[0], tuple) else 1
-# fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
-# axes = axes.reshape(1, -1) if rows == 1 else axes
+    # outs.append((img, *image_visual_stats(img)))
 
-# #plot
-# for outp, ax_row in zip(outs, axes):
-#     for out, ax in zip(outp, ax_row):
-#         if isinstance(out, tuple) and out[0] == True:
-#             ax.imshow(out[1])
-#             ax.axis('off')
-#         else:
-#             ax.imshow(out, cmap='gray')
-#             ax.axis('off')
+# setup plot
+plot_size = 1
+rows, cols = len(outs), len(outs[0]) if isinstance(outs[0], tuple) else 1
+fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
+axes = axes.reshape(1, -1) if rows == 1 else axes
 
-# plt.tight_layout()
-# plt.show()
+#plot
+for outp, ax_row in zip(outs, axes):
+    for out, ax in zip(outp, ax_row):
+        if isinstance(out, tuple) and out[0] == True:
+            ax.imshow(out[1])
+            ax.axis('off')
+        else:
+            ax.imshow(out, cmap='gray')
+            ax.axis('off')
+
+plt.tight_layout()
+plt.show()
 
 #==============================================================================
-#   Segmentation
+#   PUNCTURE Segmentation
 #==============================================================================
 
 #Within a masked image: find dark areas and return a mask cooresponding to them
-def segment_dark_holes(image, mask, open_k_size=(3,3), close_k_size=(3,3), open_iter=1, close_iter=2, connectivity=8, min_area=200):
+def segment_punctures(image, mask, open_k_size=(3,3), close_k_size=(3,3), open_iter=1, close_iter=2, connectivity=8, min_area=200):
+    '''
+        Segment out the holes within a box by looking for dark areas and doing some cleanup to remove noise.
+
+        image: A single channel grayscale image.
+        mask: A segmentation mask of the cardboard box.
+    '''
     #Otsu
     _, dark_mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
@@ -228,39 +259,54 @@ def segment_dark_holes(image, mask, open_k_size=(3,3), close_k_size=(3,3), open_
     return (hole_mask_d, )
 
 #process images
-outs = []
-for i in range(len(ds2_test)):
-    #prepare image
-    img = ds2_test[i]
-    img = np.moveaxis(img, 0, -1) * 255
-    img = img.astype(np.uint8)
+# outs = []
+# for i in range(len(ds2_test)):
+#     #prepare image
+#     img = ds2_test[i]
+#     img = np.moveaxis(img, 0, -1) * 255
+#     img = img.astype(np.uint8)
 
-    #pass through pre-process
-    img_and_mask = mask_out_box(img)
-    hole_mask = segment_dark_holes(*img_and_mask)
-    stuff_2_plot = ((img, *img_and_mask, *hole_mask))
-    outs.append(stuff_2_plot)
+#     #pass through pre-process
+#     img_and_mask = mask_out_box(img)
+#     # hole_mask = segment_punctures(*img_and_mask)
+#     stuff_2_plot = (img, *img_and_mask)
+#     outs.append(stuff_2_plot)
 
-#setup plot
-plot_size = 1
-rows, cols = len(outs), len(outs[0]) if isinstance(outs[0], tuple) else 1
-fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
-axes = axes.reshape(1, -1) if rows == 1 else axes
+# #setup plot
+# plot_size = 1
+# rows, cols = len(outs), len(outs[0]) if isinstance(outs[0], tuple) else 1
+# fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
+# axes = axes.reshape(1, -1) if rows == 1 else axes
 
-#plot
-for outp, ax_row in zip(outs, axes):
-    for out, ax in zip(outp, ax_row):
-        if isinstance(out, tuple) and out[0] == True:
-            ax.imshow(out[1])
-            ax.axis('off')
-        else:
-            ax.imshow(out, cmap='gray')
-            ax.axis('off')
+# #plot
+# for outp, ax_row in zip(outs, axes):
+#     for out, ax in zip(outp, ax_row):
+#         if isinstance(out, tuple) and out[0] == True:
+#             ax.imshow(out[1])
+#             ax.axis('off')
+#         else:
+#             ax.imshow(out, cmap='gray')
+#             ax.axis('off')
 
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.show()
+
+#==============================================================================
+#   CRUSH Segmentation
+#==============================================================================
+
+def segment_crush_zones(image, mask):
+    '''
+        Segment out the crush zones of an image by looking at areas where repeated wavy patterns of crushes appear 
+        within the box.
+    
+        image: A single channel grayscale image.
+        mask: A segmentation mask of the cardboard box.
+    '''
 
 #==============================================================================
 #   Masking
 #==============================================================================
+
+
 
