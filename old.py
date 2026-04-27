@@ -252,3 +252,33 @@ def mask_out_box_3(image: np.ndarray, pre_trim_min_length=50, dilate_kernel_size
             filtered = cv2.bitwise_or(filtered, comp)
     
     return filtered
+
+
+
+def image_visual_stats(image):
+    # image = cv2.GaussianBlur(image, (33,33), 0)   
+    # img_r, img_g, img_b = img[:,:,0], img[:,:,1], img[:,:,2]
+    # img_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    # img_h, img_s, img_v = img_hsv[:,:,0], img_hsv[:,:,1], img_hsv[:,:,2]
+
+    # img_parts = [img_r, img_g, img_b, img_h, img_s, img_v]
+    img_parts = [cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)]
+    edge_masks = []
+    for img_part in img_parts:
+        _, edges = cv2.threshold(img_part, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        edges = cv2.adaptiveThreshold(img_part, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+        dilate_kernel = np.ones((5, 5), np.uint8)
+        edges = cv2.dilate(edges, dilate_kernel, iterations=2)        
+        contours, _ = cv2.findContours(image=edges, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
+        contour_mask = contour_to_mask(contours, image.shape, fill=True)
+
+        # edges = cv2.adaptiveThreshold(contour_mask, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
+        # edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8), iterations=6)
+        # edges = cv2.morphologyEx(edges, cv2.MORPH_OPEN, np.ones((5,5), np.uint8), iterations=2)
+
+        # contours, _ = cv2.findContours(image=edges, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
+        # contour_mask = contour_to_mask(contours, image.shape, fill=True)
+        edge_masks.append(contour_mask)
+
+    return (*edge_masks,)
+    # return (*img_parts,)

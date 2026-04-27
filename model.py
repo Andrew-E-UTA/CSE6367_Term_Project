@@ -43,7 +43,6 @@ from torchvision import transforms
 # if not data_path_2.is_dir():
 #     kagglehub.dataset_download("madhusastra/cardboard-defect", output_dir=str(data_path_2))
 
-
 #dataset must implement __init__, __len__, __getitem__
 class CSE6367_Cardboardbox_dataset(Dataset):
     def __init__(self, dir, transform):
@@ -123,8 +122,18 @@ def approximate_contours(contours, alpha = .01):
     ]
     return approx_contours
 
+def create_convex_hull_mask(contours, shape):
+    all_points = np.vstack([cnt.squeeze() for cnt in contours if cnt.shape[0] >= 3])
+    if all_points.shape[0] >= 3:
+        hull = cv2.convexHull(all_points)
+        hull_mask = np.zeros(shape, dtype=np.uint8)
+        cv2.fillPoly(cv2.Mat(hull_mask), [hull], 255)
+        return hull_mask
+
 #Full Pre-processing step of graying image and extracting it from the background
-def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_length= 20, trim_length=200, dilate_kernel_size=3, dilate_iterations=2):
+def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, 
+                 pre_trim_length= 20, trim_length=200, dilate_kernel_size=5, 
+                 dilate_iterations=3):
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(12,12))               
@@ -133,67 +142,40 @@ def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_le
     #Edge detection
     edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, adaptive_block, adaptive_C)
     
-    #Find contours & simplify for efficiency
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    simplified_contours = [
-        cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
-        for cnt in contours
-    ]
-    simplified_contours = trim_by_len(simplified_contours, min_length=pre_trim_length)
-    simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
+    # #Find contours & simplify for efficiency
+    # contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # simplified_contours = [
+    #     cv2.approxPolyDP(cnt, .01 * cv2.arcLength(cnt, closed=False), closed=False) 
+    #     for cnt in contours
+    # ]
+    # simplified_contours = trim_by_len(simplified_contours, min_length=pre_trim_length)
+    # simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
 
-    # #Dilate contours
-    dilate_kernel = np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8)
-    dilated_mask = cv2.dilate(simplified_contours_mask, dilate_kernel, iterations=dilate_iterations)        
-    dilated_contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # # #Dilate contours
+    # dilate_kernel = np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8)
+    # dilated_mask = cv2.dilate(simplified_contours_mask, dilate_kernel, iterations=dilate_iterations)        
+    # dilated_contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Filter out short contours
-    trimmed_contours = trim_by_len(dilated_contours, min_length=trim_length)  
+    # # Filter out short contours
+    # trimmed_contours = trim_by_len(dilated_contours, min_length=trim_length)  
 
-    #Largest contour based on area
-    max_contour = max(trimmed_contours, key=cv2.contourArea)
-    largest_mask = contour_to_mask(max_contour, gray.shape, fill=False)
+    # #Largest contour based on area
+    # max_contour = max(trimmed_contours, key=cv2.contourArea)
+    # largest_mask = contour_to_mask(max_contour, gray.shape, fill=True)
 
-    masked_image = apply_mask(gray, largest_mask)
+    # masked_image = apply_mask(gray, largest_mask)
 
-    return (masked_image, largest_mask)
-
-def image_visual_stats(image):
-    image = cv2.GaussianBlur(image, (33,33), 0)   
-    img_r, img_g, img_b = img[:,:,0], img[:,:,1], img[:,:,2]
-    img_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    img_h, img_s, img_v = img_hsv[:,:,0], img_hsv[:,:,1], img_hsv[:,:,2]
-
-    img_parts = [img_r, img_g, img_b, img_h, img_s, img_v]
-    edge_masks = []
-    for img_part in img_parts:
-        edges = cv2.adaptiveThreshold(img_part, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
-        # edges = cv2.Sobel(img_part, ddepth=cv2.CV_8U, dx=0, dy=1, ksize=5)
-        # _, edges = cv2.threshold(img_part, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        # contours, _ = cv2.findContours(image=edges, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
-        # contours = trim_by_len(contours, 10)
-        # contour_mask = contour_to_mask(contours, image.shape, color=True)
-
-        # edges = cv2.adaptiveThreshold(contour_mask, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5)
-        # edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5,5), np.uint8), iterations=1)
-
-        edge_masks.append(edges)
-
-    return (*edge_masks,)
-    # return (*img_parts,)
+    return (edges, )
 
 #process images
 outs = []
-for i in range(len(ideal_dataset)):
+for img in ideal_dataset:
     #prepare image
-    img = ideal_dataset[i]
     img = np.moveaxis(img, 0, -1) * 255
     img = img.astype(np.uint8)
 
     #pass through pre-process
-    img_and_mask = mask_out_box(img)
-    outs.append((img, *img_and_mask))
-
+    outs.append((img, *mask_out_box(img)))
     # outs.append((img, *image_visual_stats(img)))
 
 # setup plot
@@ -294,8 +276,11 @@ def segment_punctures(image, mask, open_k_size=(3,3), close_k_size=(3,3), open_i
 #==============================================================================
 #   CRUSH Segmentation
 #==============================================================================
-
-def segment_crush_zones(image, mask):
+def segment_crushes(image, mask, 
+                         canny_low=100, canny_high=400,
+                         blur_kernel=(15,15), #tried  different kernel size but this is good. 
+                         thresh_val=30,  #seems to be good for wrinkles
+                         min_area=300):
     '''
         Segment out the crush zones of an image by looking at areas where repeated wavy patterns of crushes appear 
         within the box.
@@ -303,6 +288,26 @@ def segment_crush_zones(image, mask):
         image: A single channel grayscale image.
         mask: A segmentation mask of the cardboard box.
     '''
+    # Edge detection
+    edges = cv2.Canny(image, canny_low, canny_high)
+
+    edges = apply_mask(edges, mask)
+    density = cv2.blur(edges, blur_kernel)
+    _, crush_mask = cv2.threshold(density, thresh_val, 255, cv2.THRESH_BINARY)
+
+    # Clean up mask (remove noise)
+    crush_mask = cv2.morphologyEx(crush_mask, cv2.MORPH_OPEN, np.ones((3,3), np.uint8), iterations=1)
+    crush_mask = cv2.morphologyEx(crush_mask, cv2.MORPH_CLOSE, np.ones((5,5), np.uint8), iterations=2)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(crush_mask, 8)
+    clean_mask = np.zeros_like(crush_mask)
+
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= min_area:
+            clean_mask[labels == i] = 255
+
+    return clean_mask
 
 #==============================================================================
 #   Masking
