@@ -107,7 +107,7 @@ ds2_train = CSE6367_Cardboardbox_dataset(
 
 #remove noise (contours with small length)
 def trim_contours(contours, min_length):
-    return [cnt for cnt in contours if cv2.arcLength(cnt, closed=False) >= min_length]
+    return [cnt for cnt in contours if cv2.arcLength(cnt, closed=True) >= min_length]
 
 #visualize contours
 def contour_to_mask(contours, shape, fill=False, thickness=2, color=False, seed=42):
@@ -137,14 +137,194 @@ def get_contours_and_mask(single_ch_img, trim_len=10):
 
 
 
+
+def image_visual_stats(image: np.ndarray,
+                       dilate_kernel_size=3,
+                       dilate_iterations=2,
+                       pre_trim_length=30,
+                       trim_length=200):
+
+    print(f"Type: {type(image)}")
+    if image is not None:
+        print(f"Shape: {image.shape}")
+    else:
+        print("Image is NONE!")
+        return None
+
+    # Blur
+    image = cv2.GaussianBlur(image, (7,7), 0)
+
+    # Split channels (NOTE: OpenCV uses BGR, not RGB)
+    img_b, img_g, img_r = image[:,:,0], image[:,:,1], image[:,:,2]
+    img_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    img_v = img_hsv[:,:,2]
+
+    img_parts = [img_r, img_g, img_b, img_v]
+    channel_names = ["R", "G", "B", "V"]
+
+    # Combined mask (final output)
+    combined_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+
+    # Store masks per channel
+    channel_masks = {}
+
+    for idx, img_part in enumerate(img_parts):
+        name = channel_names[idx]
+
+        # Adaptive Threshold
+        #edges = cv2.adaptiveThreshold(
+         #   img_part, 255,
+          #  cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+           # cv2.THRESH_BINARY_INV,
+            #11, 3
+        #)
+
+        # Canny edges
+        edges = cv2.Canny(img_part, 40, 100)
+
+        #plt.figure(figsize=(12,3))
+
+        #plt.subplot(1,3,1)
+        #plt.imshow(img_part, cmap='gray')
+        #plt.title("Input")
+
+        #plt.subplot(1,3,2)
+        #plt.imshow(edges, cmap='gray')
+        #plt.title("Canny")
+
+        #plt.subplot(1,3,3)
+    
+
+        # Combine
+        #edges = cv2.bitwise_or(thres, cannyEdges)
+
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contour_img = cv2.drawContours(np.zeros_like(edges), contours, -1, 255, 1)
+        #plt.imshow(contour_img, cmap='gray')
+        #plt.title("Contours")
+
+        #plt.show()
+        # Simplify contours
+        simplified_contours = [
+            cv2.approxPolyDP(cnt, 0.01 * cv2.arcLength(cnt, True), True)
+            for cnt in contours
+        ]
+
+        simplified_img = np.zeros_like(edges)
+
+        cv2.drawContours(
+            simplified_img,
+            simplified_contours,
+            -1,              # draw all contours
+            255,             # white
+            1                # thickness
+        )
+
+
+        plt.figure(figsize=(15,4))
+
+        plt.subplot(1,3,1)
+        plt.imshow(edges, cmap='gray')
+        plt.title("Canny Edges")
+
+        plt.subplot(1,3,2)
+        plt.imshow(contour_img, cmap='gray')
+        plt.title("Contours")
+
+        plt.subplot(1,3,3)
+        plt.imshow(simplified_img, cmap='gray')
+        plt.title("Simplified Contours")
+
+        plt.show()
+
+
+
+        # Remove small contours
+        simplified_contours = trim_contours(simplified_contours, pre_trim_length)
+
+        # Convert to mask (outline)
+        mask = contour_to_mask(simplified_contours, image.shape[:2], fill=False, thickness=1)
+
+        # Dilate to connect fragments
+        kernel = np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=dilate_iterations)
+
+        # Close gaps
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8), iterations=1)
+
+        # Recompute contours after cleanup
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = trim_contours(contours, trim_length)
+
+        # Keep largest contour only
+        if len(contours) > 0:
+            max_contour = max(contours, key=cv2.contourArea)
+            largest_mask = contour_to_mask(max_contour, image.shape[:2], fill=True)
+
+            # Add to combined mask
+            combined_mask = cv2.bitwise_or(combined_mask, largest_mask)
+
+            # Store this channel’s FINAL mask
+            channel_masks[name] = largest_mask.copy()
+        else:
+            # If nothing found, store empty mask
+            channel_masks[name] = np.zeros(image.shape[:2], dtype=np.uint8)
+
+    return combined_mask, channel_masks
+
+
+for idx in range(len(ds2_test)):
+    img = ds2_test[idx]
+
+    img = np.moveaxis(img, 0, -1)
+    img = (img * 255).astype(np.uint8)
+
+    combined_mask, channel_masks = image_visual_stats(img)
+
+    fig, axes = plt.subplots(1, 5, figsize=(15, 4))
+
+    axes[0].imshow(combined_mask, cmap='gray')
+    axes[0].set_title("Combined")
+    axes[0].axis('off')
+
+    for i, (name, m) in enumerate(channel_masks.items()):
+        axes[i+1].imshow(m, cmap='gray')
+        axes[i+1].set_title(f"{name}")
+        axes[i+1].axis('off')
+
+    plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #Helps detects edges more reliably. Grayscale + Contrast enhancement 
 
 #Full Pre-processing step of graying image and extracting it from the background
-def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_length= 20, trim_length=200, dilate_kernel_size=3, dilate_iterations=2):
+def mask_out_box(image: np.ndarray, adaptive_block=21, adaptive_C=7, pre_trim_length= 4, trim_length=200, dilate_kernel_size=5, dilate_iterations=2):
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(12,12))               
     gray = clahe.apply(gray)    
+
+
+    gray = cv2.GaussianBlur(gray, (3,3), 0)
+
+
 
     #Edge detection
     #   Nestor # adaptive thresholding instead of Canny?
@@ -160,12 +340,19 @@ def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_le
         for cnt in contours
     ]
     simplified_contours = trim_contours(simplified_contours, min_length=pre_trim_length)
-    simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=2)
+    simplified_contours_mask = contour_to_mask(simplified_contours, gray.shape, fill=False, thickness=3)
 
     # #Dilate contours
     dilate_kernel = np.ones((dilate_kernel_size, dilate_kernel_size), np.uint8)
     dilated_mask = cv2.dilate(simplified_contours_mask, dilate_kernel, iterations=dilate_iterations)        
     dilated_contours, _ = cv2.findContours(dilated_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+
+    #morphological closing. fills gaps and connects broken edges
+    kernel = np.ones((5,5), np.uint8)
+    dilated_mask = cv2.morphologyEx(dilated_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+
 
     # Filter out short contours
     trimmed_contours = trim_contours(dilated_contours, min_length=trim_length)  
@@ -179,16 +366,21 @@ def mask_out_box(image: np.ndarray, adaptive_block=15, adaptive_C=5, pre_trim_le
     return (masked_image, largest_mask)
 
 #process images
-outs = []
-for i in range(len(ds2_test)):
+#outs = []
+#for i in range(len(ds2_test)):
     #prepare image
-    img = ds2_test[i]
-    img = np.moveaxis(img, 0, -1) * 255
-    img = img.astype(np.uint8)
+    #img = ds2_test[i]
+    #img = np.moveaxis(img, 0, -1) * 255
+    #img = img.astype(np.uint8)
 
     #pass through pre-process
-    img_and_mask = mask_out_box(img)
-    outs.append(img_and_mask)
+    #img_and_mask = mask_out_box(img)
+
+
+
+
+
+   # outs.append(img_and_mask)
 
 #setup plot
 # plot_size = 1
@@ -289,43 +481,6 @@ def segment_crush_damage(image, mask,
 
 
 
-
-#process images
-outs = []
-#for i in range(len(ds2_test)):
-for i in range(min(5,len(ds2_test))):
-    #prepare image
-    img = ds2_test[i]
-    img = np.moveaxis(img, 0, -1) * 255
-    img = img.astype(np.uint8)
-
-    #pass through pre-process
-    img_and_mask = mask_out_box(img)
-    wrinkle_mask = segment_crush_damage(*img_and_mask)
-    #hole_mask = segment_dark_holes(*img_and_mask)
-    #stuff_2_plot = ((img, *img_and_mask, *hole_mask))
-
-    stuff_2_plot = ((img, *img_and_mask, wrinkle_mask))
-    outs.append(stuff_2_plot)
-
-#setup plot
-plot_size = 1
-rows, cols = len(outs), len(outs[0]) if isinstance(outs[0], tuple) else 1
-fig, axes = plt.subplots(rows, cols, figsize=(cols * plot_size, rows * plot_size))
-axes = axes.reshape(1, -1) if rows == 1 else axes
-
-#plot
-for outp, ax_row in zip(outs, axes):
-    for out, ax in zip(outp, ax_row):
-        if isinstance(out, tuple) and out[0] == True:
-            ax.imshow(out[1])
-            ax.axis('off')
-        else:
-            ax.imshow(out, cmap='gray')
-            ax.axis('off')
-
-plt.tight_layout()
-plt.show()
 
 #==============================================================================
 #   Masking
