@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<annotations>
+  <version>1.1</version>
+  <meta>
+    <job>
+      <id>3939189</id>
+      <size>14</size>
+      <mode>annotation</mode>
+      <overlap>0</overlap>
+      <bugtracker></bugtracker>
+      <created>2026-05-01 20:56:00.723880+00:00</created>
+      <updated>2026-05-01 21:03:17.167693+00:00</updated>
+      <subset>Test</subset>
+      <start_frame>0</start_frame>
+      <stop_frame>13</stop_frame>
+      <frame_filter></frame_filter>
+      <segments>
+        <segment>
+          <id>3937517</id>
+          <start>0</start>
+          <stop>13</stop>
+          <url>https://app.cvat.ai/api/jobs/3939189/dataset/export/api/jobs/3939189</url>
+        </segment>
+      </segments>
+      <owner>
+        <username>kyojin._.</username>
+        <email>ame4230@mavs.uta.edu</email>
+      </owner>
+      <assignee>
+        <username>kyojin._.</username>
+        <email>ame4230@mavs.uta.edu</email>
+      </assignee>
+      <labels>
+        <label>
+          <name>Crush</name>
+          <color>#2B00FF</color>
+          <type>rectangle</type>
+          <attributes>
+          </attributes>
+        </label>
+        <label>
+          <name>Puncture</name>
+          <color>#fb0808</color>
+          <type>rectangle</type>
+          <attributes>
+          </attributes>
+        </label>
+      </labels>
+    </job>
+    <dumped>2026-05-01 21:04:55.197118+00:00</dumped>
+  </meta>
+  <image id="0" name="360_F_142845117_l1Q2DWHzw6vP0q62JMOaiqpn6OBdhXoJ_jpg.rf.43dfdbdb9a0385f45374729a22ce0256.jpg" width="640" height="640">
+    <box label="Crush" source="manual" occluded="0" xtl="179.34" ytl="131.93" xbr="515.93" ybr="286.80" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="369.76" ytl="334.99" xbr="549.91" ybr="444.82" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="56.08" ytl="214.10" xbr="106.65" ybr="353.17" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="506.45" ytl="345.26" xbr="536.47" ybr="387.14" z_order="0">
+    </box>
+  </image>
+  <image id="1" name="360_F_240397341_x2hagi54vmrG41GyBGestrrg7ERSDnT0_jpg.rf.538147b38d68af87f4f13dd60cf2c179.jpg" width="640" height="640">
+    <box label="Puncture" source="manual" occluded="0" xtl="119.29" ytl="165.12" xbr="234.65" ybr="244.92" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="368.18" ytl="455.09" xbr="561.76" ybr="520.67" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="361.86" ytl="201.46" xbr="562.55" ybr="319.19" z_order="0">
+    </box>
+  </image>
+  <image id="2" name="360_F_329642087_kdPJuOC69m1d5lZbLaEhz2KtatEMvoBW_jpg.rf.1fbc649d1de1bcd8d97be55596415363.jpg" width="640" height="640">
+    <box label="Crush" source="manual" occluded="0" xtl="132.72" ytl="308.92" xbr="335.78" ybr="476.42" z_order="0">
+    </box>
+  </image>
+  <image id="3" name="360_F_333884700_LXcmVMFWJFzXskQIGIxfgxLPtHFWPf1a-1-_jpg.rf.4772057d9d7fa8ccb9d63b12dc8639ed.jpg" width="583" height="567">
+    <box label="Puncture" source="manual" occluded="0" xtl="112.58" ytl="334.90" xbr="235.85" ybr="421.77" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="64.35" ytl="239.07" xbr="125.95" ybr="436.47" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="233.05" ytl="70.30" xbr="457.05" ybr="160.67" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="239.35" ytl="329.30" xbr="494.15" ybr="475.67" z_order="0">
+    </box>
+  </image>
+  <image id="4" name="360_F_486960925_KDMqc7nvQNxKiCBUQYDxAd3qdHfNaiRU_jpg.rf.ac13454f1ae472a10d9e8bc95f429ceb.jpg" width="640" height="640">
+    <box label="Puncture" source="manual" occluded="0" xtl="512.77" ytl="503.29" xbr="551.49" ybr="538.84" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="283.63" ytl="104.28" xbr="517.51" ybr="229.91" z_order="0">
+    </box>
+  </image>
+  <image id="5" name="96_jpg.rf.c0b6143319e331db26c830447d8d9178.jpg" width="640" height="640">
+  </image>
+  <image id="6" name="Penyok-140-_jpg.rf.61e9e4b130d77d49d9026578d57c10d0.jpg" width="640" height="640">
+    <box label="Puncture" source="manual" occluded="0" xtl="481.17" ytl="229.91" xbr="543.59" ybr="308.92" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="433.76" ytl="241.76" xbr="469.31" ybr="298.65" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="107.44" ytl="161.96" xbr="346.05" ybr="425.86" z_order="0">
+    </box>
+  </image>
+  <image id="7" name="Penyok-30-_jpg.rf.0bfcb505e57acd627f1fe366f395c5a3.jpg" width="640" height="640">
+    <box label="Crush" source="manual" occluded="0" xtl="134.30" ytl="188.03" xbr="323.14" ybr="600.47" z_order="0">
+    </box>
+  </image>
+  <image id="8" name="damaged-boxes-700x395-1_jpg.rf.d3159c2a8346db0ad1eb72e3449da5a5.jpg" width="640" height="640">
+    <box label="Crush" source="manual" occluded="0" xtl="315.24" ytl="248.08" xbr="549.91" ybr="363.44" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="350.80" ytl="455.09" xbr="478.80" ybr="587.04" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="116.92" ytl="223.59" xbr="155.63" ybr="383.98" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="209.36" ytl="338.94" xbr="240.97" ybr="373.71" z_order="0">
+    </box>
+  </image>
+  <image id="9" name="damaged-cardboard-boxes_7_jpeg_jpg.rf.3fcf5c42e5b5409b66c047a39398eae4.jpg" width="601" height="563">
+    <box label="Crush" source="manual" occluded="0" xtl="74.23" ytl="250.57" xbr="332.10" ybr="374.29" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="67.98" ytl="55.26" xbr="288.31" ybr="165.77" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="414.81" ytl="219.29" xbr="543.40" ybr="432.67" z_order="0">
+    </box>
+  </image>
+  <image id="10" name="istockphoto-1300003448-612x612-Copy-2-_jpg.rf.017aad4b06c304656f8a9f6dcfe60842.jpg" width="537" height="529">
+    <box label="Puncture" source="manual" occluded="0" xtl="99.64" ytl="166.19" xbr="168.93" ybr="345.79" z_order="0">
+    </box>
+    <box label="Puncture" source="manual" occluded="0" xtl="293.02" ytl="445.71" xbr="422.33" ybr="489.47" z_order="0">
+    </box>
+  </image>
+  <image id="11" name="istockphoto-168764276-612x612_jpg.rf.0088e27fe59e407e629636ca26ed40a6.jpg" width="640" height="640">
+    <box label="Crush" source="manual" occluded="0" xtl="350.80" ytl="73.46" xbr="455.09" ybr="589.41" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="262.30" ytl="491.44" xbr="368.18" ybr="591.78" z_order="0">
+    </box>
+  </image>
+  <image id="12" name="sobek-129-_jpg.rf.7457afa18cb272d324f994384d1bdcc4.jpg" width="640" height="640">
+    <box label="Puncture" source="manual" occluded="0" xtl="205.41" ytl="273.36" xbr="269.41" ybr="360.28" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="271.78" ytl="199.09" xbr="383.19" ybr="297.86" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="124.82" ytl="307.34" xbr="202.25" ybr="353.17" z_order="0">
+    </box>
+  </image>
+  <image id="13" name="sobek-56-_jpg.rf.5762553ffcb35554f6367291c1cc0f8f.jpg" width="640" height="640">
+    <box label="Puncture" source="manual" occluded="0" xtl="285.21" ytl="234.65" xbr="412.42" ybr="393.46" z_order="0">
+    </box>
+    <box label="Crush" source="manual" occluded="0" xtl="329.46" ytl="377.66" xbr="428.23" ybr="470.10" z_order="0">
+    </box>
+  </image>
+</annotations>

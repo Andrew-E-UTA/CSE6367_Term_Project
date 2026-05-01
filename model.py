@@ -19,6 +19,7 @@ import kagglehub
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from matplotlib.patches import Rectangle
+import xml.etree.ElementTree as ET
 
 #CV imports
 import cv2  
@@ -182,7 +183,7 @@ def pre_process_visualization():
 #Within a masked image: find dark areas and return a mask cooresponding to them
 def segment_punctures(image, mask, 
                       open_k_size=(3,3), close_k_size=(3,3), 
-                      open_iter=1, close_iter=2, connectivity=8, 
+                      open_iter=1, close_iter=8, connectivity=8, 
                       min_area=200):
     # Convert to grayscale and histogram equalization
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -213,11 +214,11 @@ def segment_punctures(image, mask,
     #clean up the hole_mask by doing some manual opening
     hole_mask = apply_mask(hole_mask, mask)
 
-    hole_mask_e = cv2.morphologyEx(hole_mask, cv2.MORPH_ERODE, np.ones((3,3), np.uint8), iterations=5)
+    hole_mask_e = cv2.morphologyEx(hole_mask, cv2.MORPH_ERODE, np.ones((3,3), np.uint8), iterations=8)
     hole_mask_d = cv2.morphologyEx(hole_mask_e, cv2.MORPH_DILATE, np.ones((5,5), np.uint8), iterations=3)
 
-    return (gray, dark_mask, mask, hole_mask_e, hole_mask_d)
-    # return hole_mask_d
+    # return (gray, dark_mask, mask, hole_mask_e, hole_mask_d)
+    return hole_mask_d
 
 def puncture_visualization():
     outs = []
@@ -464,13 +465,255 @@ def damage_visualization():
     plt.show()
 
 #==============================================================================
+#   Manual Evaluation
+#==============================================================================
+
+def parse_cvat_annotations(xml_path):
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    # Get label names (optional, for reference)
+    labels = {}
+    meta = root.find("meta")
+    if meta is not None:
+        job = meta.find("job")
+        if job is not None:
+            for label_elem in job.findall("labels/label"):
+                name = label_elem.find("name").text
+                labels[name] = True
+
+    # Iterate over all images
+    annotations = []   # list of dicts per image
+    for image in root.findall("image"):
+        image_name = image.get("name")
+        width = int(image.get("width"))
+        height = int(image.get("height"))
+        
+        boxes = []
+        for box in image.findall("box"):
+            label = box.get("label")
+            xtl = float(box.get("xtl"))
+            ytl = float(box.get("ytl"))
+            xbr = float(box.get("xbr"))
+            ybr = float(box.get("ybr"))
+            boxes.append({
+                "label": label,
+                "bbox": [xtl, ytl, xbr, ybr],   # absolute pixel coordinates
+                "width": xbr - xtl,              # box width
+                "height": ybr - ytl              # box height
+            })
+        
+        annotations.append({
+            "image_name": image_name,
+            "image_width": width,
+            "image_height": height,
+            "boxes": boxes
+        })
+    
+    return annotations
+def compute_iou(boxA, boxB):
+    """
+    box format: (x, y, w, h) for both
+    """
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[0] + boxA[2], boxB[0] + boxB[2])
+    yB = min(boxA[1] + boxA[3], boxB[1] + boxB[3])
+    inter = max(0, xB - xA) * max(0, yB - yA)
+    areaA = boxA[2] * boxA[3]
+    areaB = boxB[2] * boxB[3]
+    union = areaA + areaB - inter
+    return inter / union if union > 0 else 0.0
+
+def match_boxes(gt_boxes, pred_boxes, iou_thresh=0.2):
+    """
+    Greedy matching. Returns: list of (gt_idx, pred_idx, iou)
+    """
+    matches = []
+    used_pred = [False] * len(pred_boxes)
+    for i_gt, gt in enumerate(gt_boxes):
+        best_iou = iou_thresh
+        best_idx = -1
+        for i_pred, pred in enumerate(pred_boxes):
+            if used_pred[i_pred]:
+                continue
+            iou_val = compute_iou(gt, pred)
+            if iou_val > best_iou:
+                best_iou = iou_val
+                best_idx = i_pred
+        if best_idx != -1:
+            matches.append((i_gt, best_idx, best_iou))
+            used_pred[best_idx] = True
+    return matches
+
+def evaluate_pipeline_with_annotations(annotations, dataset, iou_threshold=0.01):
+    """
+    annotations: list from parse_cvat_annotations
+    dataset: CSE6367_Cardboardbox_dataset instance (has image_paths list)
+    Returns: list of dicts per image per class
+    """
+    # Build a mapping from image filename (as stored in annotation) to dataset index
+    name_to_idx = {}
+    for idx, path in enumerate(dataset.image_paths):
+        # Use only the filename part (without directory)
+        fname = path.name
+        name_to_idx[fname] = idx
+
+    results = []  # each entry: {'image_idx': int, 'class': str, 'TP': int, 'FP': int, 'FN': int, 'iou_loss': float}
+
+    for ann in annotations:
+        img_name = ann['image_name']
+        if img_name not in name_to_idx:
+            print(f"Warning: {img_name} not found in dataset, skipping")
+            continue
+
+        img_idx = name_to_idx[img_name]
+        # Load image from dataset (using the same transform pipeline)
+        img_tensor = dataset[img_idx]  # returns numpy array (C,H,W) in [0,1]
+        img = (np.moveaxis(img_tensor, 0, -1) * 255).astype(np.uint8)
+
+        # Run pipeline to get predicted boxes for both classes
+        box_mask = mask_out_box(img)
+        puncture_mask = segment_punctures(img, box_mask)
+        crush_mask = segment_crushes(img, box_mask)
+
+        # Get predicted bounding boxes (x,y,w,h) for each class
+        pred_punctures = [rect for (rect, _) in grouping_stats(puncture_mask)[0]]
+        pred_crushes = [rect for (rect, _) in grouping_stats(crush_mask)[0]]
+
+        # Ground truth boxes from annotations (convert from x1,y1,x2,y2 to x,y,w,h)
+        gt_punctures = []
+        gt_crushes = []
+        for box in ann['boxes']:
+            x1, y1, x2, y2 = box['bbox']
+            w = x2 - x1
+            h = y2 - y1
+            if box['label'] == 'Puncture':
+                gt_punctures.append((x1, y1, w, h))
+            else:  # 'Crush'
+                gt_crushes.append((x1, y1, w, h))
+
+        # Evaluate each class
+        for class_name, gt_list, pred_list in [('Puncture', gt_punctures, pred_punctures),
+                                                ('Crush', gt_crushes, pred_crushes)]:
+            matches = match_boxes(gt_list, pred_list, iou_threshold)
+            tp = len(matches)
+            fp = len(pred_list) - tp
+            fn = len(gt_list) - tp
+            iou_loss = sum(1.0 - iou for (_, _, iou) in matches)  # sum of (1 - IoU) for matched pairs
+
+            results.append({
+                'image_idx': img_idx,
+                'class': class_name,
+                'TP': tp,
+                'FP': fp,
+                'FN': fn,
+                'iou_loss': iou_loss
+            })
+
+    return results
+
+def display_evaluation_table(results):
+    """
+    Creates a GUI table (matplotlib) showing FP, FN, TP, IoU loss per image-class pair.
+    Labels images as 'image_X' (X = dataset index) without filename.
+    """
+    # Group results by image index and class
+    import matplotlib.pyplot as plt
+    from matplotlib.table import Table
+
+    # Build rows: each row = (image_label, class, TP, FP, FN, iou_loss)
+    rows = []
+    for r in sorted(results, key=lambda x: (x['image_idx'], x['class'])):
+        image_label = f"image_{r['image_idx']}"
+        rows.append([
+            image_label,
+            r['class'],
+            r['TP'],
+            r['FP'],
+            r['FN'],
+            f"{r['iou_loss']:.2f}"
+        ])
+
+    if not rows:
+        print("No results to display.")
+        return
+
+    # Create figure and table
+    fig, ax = plt.subplots(figsize=(8, len(rows) * 0.4 + 1))
+    ax.axis('off')
+    table = Table(ax, bbox=[0, 0, 1, 1])
+    n_rows = len(rows)
+    n_cols = 6
+    col_labels = ['Image', 'Class', 'TP', 'FP', 'FN', 'IoU Loss']
+
+    # Add header
+    for j, label in enumerate(col_labels):
+        table.add_cell(0, j, width=0.15, height=0.05, text=label, loc='center', facecolor='lightgray')
+
+    # Add data rows
+    for i, row in enumerate(rows, start=1):
+        for j, cell_text in enumerate(row):
+            table.add_cell(i, j, width=0.15, height=0.05, text=cell_text, loc='center')
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    ax.add_table(table)
+    plt.title("Detection Evaluation per Image per Class (IoU threshold = 0.5)")
+    plt.tight_layout()
+    plt.show()
+
+#==============================================================================
 #   Main
 #==============================================================================
 def main():
-    # pre_process_visualization()
-    # puncture_visualization()
-    crush_visualization()
-    # damage_visualization()
+    # Parse ground truth annotations
+    annotations = parse_cvat_annotations("./annotations.xml")
+    print(f"Loaded {len(annotations)} annotated images.")
+
+    # Run evaluation
+    results = evaluate_pipeline_with_annotations(annotations, ideal_dataset, iou_threshold=0.00001)
+
+    # Group results by class for averaging
+    classes = ['Puncture', 'Crush']
+    class_metrics = {cls: {'TP': [], 'FP': [], 'FN': [], 'iou_loss': []} for cls in classes}
+    all_metrics = {'TP': [], 'FP': [], 'FN': [], 'iou_loss': []}
+
+    for r in results:
+        cls = r['class']
+        class_metrics[cls]['TP'].append(r['TP'])
+        class_metrics[cls]['FP'].append(r['FP'])
+        class_metrics[cls]['FN'].append(r['FN'])
+        class_metrics[cls]['iou_loss'].append(r['iou_loss'])
+        all_metrics['TP'].append(r['TP'])
+        all_metrics['FP'].append(r['FP'])
+        all_metrics['FN'].append(r['FN'])
+        all_metrics['iou_loss'].append(r['iou_loss'])
+
+    # Print per-image table to console
+    print("\nPer-Image Evaluation (Console):")
+    print(f"{'Image':<10} {'Class':<8} {'TP':<3} {'FP':<3} {'FN':<3} {'IoU Loss':<8}")
+    for r in sorted(results, key=lambda x: (x['image_idx'], x['class'])):
+        print(f"image_{r['image_idx']:<4} {r['class']:<8} {r['TP']:<3} {r['FP']:<3} {r['FN']:<3} {r['iou_loss']:<8.2f}")
+
+    # Print averages
+    print("\n=== Average Metrics ===")
+    for cls in classes:
+        tp_avg = sum(class_metrics[cls]['TP']) / len(class_metrics[cls]['TP']) if class_metrics[cls]['TP'] else 0
+        fp_avg = sum(class_metrics[cls]['FP']) / len(class_metrics[cls]['FP']) if class_metrics[cls]['FP'] else 0
+        fn_avg = sum(class_metrics[cls]['FN']) / len(class_metrics[cls]['FN']) if class_metrics[cls]['FN'] else 0
+        loss_avg = sum(class_metrics[cls]['iou_loss']) / len(class_metrics[cls]['iou_loss']) if class_metrics[cls]['iou_loss'] else 0
+        print(f"{cls}: Avg TP = {tp_avg:.2f}, Avg FP = {fp_avg:.2f}, Avg FN = {fn_avg:.2f}, Avg IoU Loss = {loss_avg:.2f}")
+
+    # Overall averages (across both classes)
+    overall_tp = sum(all_metrics['TP']) / len(all_metrics['TP']) if all_metrics['TP'] else 0
+    overall_fp = sum(all_metrics['FP']) / len(all_metrics['FP']) if all_metrics['FP'] else 0
+    overall_fn = sum(all_metrics['FN']) / len(all_metrics['FN']) if all_metrics['FN'] else 0
+    overall_loss = sum(all_metrics['iou_loss']) / len(all_metrics['iou_loss']) if all_metrics['iou_loss'] else 0
+    print(f"\nOverall (both classes): Avg TP = {overall_tp:.2f}, Avg FP = {overall_fp:.2f}, Avg FN = {overall_fn:.2f}, Avg IoU Loss = {overall_loss:.2f}")
+
+    # Display GUI table (without averages, to keep it clean)
+    display_evaluation_table(results)
 
 if __name__ == '__main__':
     main()
